@@ -206,7 +206,14 @@ readpw(Display *dpy, const char *pws)
 					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+1, x2, y2+1);
 					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+2, x2, y2+2);
 
-					XDrawString(dpy, locks[screen]->win, locks[screen]->gc, x1, y1-20, "Hello", 5);
+                    XFontStruct* font_info;
+
+                    char *font_name = "*-fixed-*-*-*-18-*";
+                    font_info = XLoadQueryFont(dpy, font_name);
+                    if (!font_info)
+                      fprintf(stderr, "XLoadQueryFont: failed loading font '%s'\n", font_name);
+                    XSetFont(dpy, locks[screen]->gc, font_info->fid);
+					XDrawString(dpy, locks[screen]->win, locks[screen]->gc, x1+20, y1-20, "CAN YOU HEAR ME", strlen("CAN YOU HEAR ME"));
 
 					XSetForeground(dpy, locks[screen]->gc, locks[screen]->colors[color]);
 					// tip of triangle
