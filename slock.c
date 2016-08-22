@@ -39,6 +39,7 @@ typedef struct {
 	Window root, win;
 	Pixmap pmap;
 	unsigned long colors[NUMCOLS];
+	GC gc;
 } Lock;
 
 static Lock **locks;
@@ -185,7 +186,39 @@ readpw(Display *dpy, const char *pws)
 			if (running && oldc != color) {
 				for (screen = 0; screen < nscreens; screen++) {
 					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[color]);
-					XClearWindow(dpy, locks[screen]->win);
+					int whiteColor = WhitePixel(dpy, screen);
+					int blackColor = BlackPixel(dpy, screen);
+					//XSetBackground(dpy, locks[screen]->gc, whiteColor);
+					XSetForeground(dpy, locks[screen]->gc, whiteColor);
+			
+					int x1, x2, y1, y2;
+					x1 = DisplayWidth(dpy, screen)/2 - 100;
+					x2 = DisplayWidth(dpy, screen)/2 + 100;
+
+					y1 = DisplayHeight(dpy, screen)/2 + 40;
+					y2 = y1;
+
+					XSetForeground(dpy, locks[screen]->gc, whiteColor);
+					XFillRectangle(dpy, locks[screen]->win, locks[screen]->gc, 0,0, DisplayWidth(dpy, screen), DisplayHeight(dpy, screen));
+
+					XSetForeground(dpy, locks[screen]->gc, blackColor);
+					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1, x2, y2);
+					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+1, x2, y2+1);
+					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+2, x2, y2+2);
+
+					XDrawString(dpy, locks[screen]->win, locks[screen]->gc, x1, y1-20, "Hello", 5);
+
+					XSetForeground(dpy, locks[screen]->gc, locks[screen]->colors[color]);
+					// tip of triangle
+					int xtt, ytt;
+					xtt = DisplayWidth(dpy, screen)/2;
+					ytt = DisplayHeight(dpy, screen)/2 + 60;
+					for(int i=0; i < 30; i++){
+					  XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
+					}
+
+					//XClearWindow(dpy, locks[screen]->win);
+					XFlush(dpy);
 				}
 				oldc = color;
 			}
@@ -211,6 +244,7 @@ unlockscreen(Display *dpy, Lock *lock)
 	XUngrabPointer(dpy, CurrentTime);
 	XFreeColors(dpy, DefaultColormap(dpy, lock->screen), lock->colors, NUMCOLS, 0);
 	XFreePixmap(dpy, lock->pmap);
+	XFreeGC(dpy, lock->gc);
 	XDestroyWindow(dpy, lock->win);
 
 	free(lock);
@@ -244,9 +278,11 @@ lockscreen(Display *dpy, int screen)
 	lock->win = XCreateWindow(dpy, lock->root, 0, 0, DisplayWidth(dpy, lock->screen), DisplayHeight(dpy, lock->screen),
 	                          0, DefaultDepth(dpy, lock->screen), CopyFromParent,
 	                          DefaultVisual(dpy, lock->screen), CWOverrideRedirect | CWBackPixel, &wa);
+	lock->gc = XCreateGC(dpy, lock->win, 0, 0);
 	lock->pmap = XCreateBitmapFromData(dpy, lock->win, curs, 8, 8);
 	invisible = XCreatePixmapCursor(dpy, lock->pmap, lock->pmap, &color, &color, 0, 0);
 	XDefineCursor(dpy, lock->win, invisible);
+	XClearWindow(dpy, lock->win);
 	XMapRaised(dpy, lock->win);
 	if (rr)
 		XRRSelectInput(dpy, lock->win, RRScreenChangeNotifyMask);
