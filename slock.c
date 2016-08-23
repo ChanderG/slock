@@ -25,6 +25,8 @@
 
 #include "util.h"
 
+#include <pthread.h>
+
 enum {
 	INIT,
 	INPUT,
@@ -115,6 +117,68 @@ getpw(void)
 }
 #endif
 
+void *updateUI(void *arg){
+
+  Display *dpy = (Display *)arg;
+
+  char *msgs[] = {"CONSIDER", "YOUR", "ACTIONS."};
+  int sizemsgs = 3;
+  int curr = 0;
+  int screen;
+
+  //while(1){
+
+    curr++;
+
+    for (screen = 0; screen < nscreens; screen++) {
+
+      int whiteColor = WhitePixel(dpy, screen);
+      int blackColor = BlackPixel(dpy, screen);
+
+      //XSetBackground(dpy, locks[screen]->gc, whiteColor);
+      XSetForeground(dpy, locks[screen]->gc, whiteColor);
+
+      int x1, x2, y1, y2;
+      x1 = DisplayWidth(dpy, screen)/2 - 100;
+      x2 = DisplayWidth(dpy, screen)/2 + 100;
+
+      y1 = DisplayHeight(dpy, screen)/2 + 40;
+      y2 = y1;
+
+      XSetForeground(dpy, locks[screen]->gc, whiteColor);
+      XFillRectangle(dpy, locks[screen]->win, locks[screen]->gc, 0,0, DisplayWidth(dpy, screen), DisplayHeight(dpy, screen));
+
+      XSetForeground(dpy, locks[screen]->gc, blackColor);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1, x2, y2);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+1, x2, y2+1);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+2, x2, y2+2);
+
+      XFontStruct* font_info;
+      char *font_name = "terminus-pt154-bold-32";
+      font_info = XLoadQueryFont(dpy, font_name);
+      if (!font_info)
+	fprintf(stderr, "XLoadQueryFont: failed loading font '%s'\n", font_name);
+      XSetFont(dpy, locks[screen]->gc, font_info->fid);
+      XDrawString(dpy, locks[screen]->win, locks[screen]->gc, x1+20, y1-20, msgs[curr%sizemsgs], strlen(msgs[curr%sizemsgs]) );
+
+      XSetForeground(dpy, locks[screen]->gc, locks[screen]->colors[INPUT]);
+      // tip of triangle
+      int xtt, ytt;
+      xtt = DisplayWidth(dpy, screen)/2;
+      ytt = DisplayHeight(dpy, screen)/2 + 60;
+      for(int i=0; i < 30; i++){
+	XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
+      }
+
+      //XClearWindow(dpy, locks[screen]->win);
+      XFlush(dpy);
+    }
+
+    sleep(3);
+  //}
+
+}
+
 static void
 #ifdef HAVE_BSD_AUTH
 readpw(Display *dpy)
@@ -131,6 +195,8 @@ readpw(Display *dpy, const char *pws)
 
 	len = 0;
 	running = True;
+
+	pthread_t ui;
 
 	/* As "slock" stands for "Simple X display locker", the DPMS settings
 	 * had been removed and you can set it with "xset" or some other
@@ -184,48 +250,10 @@ readpw(Display *dpy, const char *pws)
 			}
 			color = len ? INPUT : (failure || failonclear ? FAILED : INIT);
 			if (running && oldc != color) {
+				// start the thread
+				pthread_create(&ui, NULL, updateUI, dpy);
 				for (screen = 0; screen < nscreens; screen++) {
 					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[color]);
-					int whiteColor = WhitePixel(dpy, screen);
-					int blackColor = BlackPixel(dpy, screen);
-					//XSetBackground(dpy, locks[screen]->gc, whiteColor);
-					XSetForeground(dpy, locks[screen]->gc, whiteColor);
-			
-					int x1, x2, y1, y2;
-					x1 = DisplayWidth(dpy, screen)/2 - 100;
-					x2 = DisplayWidth(dpy, screen)/2 + 100;
-
-					y1 = DisplayHeight(dpy, screen)/2 + 40;
-					y2 = y1;
-
-					XSetForeground(dpy, locks[screen]->gc, whiteColor);
-					XFillRectangle(dpy, locks[screen]->win, locks[screen]->gc, 0,0, DisplayWidth(dpy, screen), DisplayHeight(dpy, screen));
-
-					XSetForeground(dpy, locks[screen]->gc, blackColor);
-					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1, x2, y2);
-					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+1, x2, y2+1);
-					XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+2, x2, y2+2);
-
-                    XFontStruct* font_info;
-
-                    char *font_name = "*-fixed-*-*-*-18-*";
-                    font_info = XLoadQueryFont(dpy, font_name);
-                    if (!font_info)
-                      fprintf(stderr, "XLoadQueryFont: failed loading font '%s'\n", font_name);
-                    XSetFont(dpy, locks[screen]->gc, font_info->fid);
-					XDrawString(dpy, locks[screen]->win, locks[screen]->gc, x1+20, y1-20, "CAN YOU HEAR ME", strlen("CAN YOU HEAR ME"));
-
-					XSetForeground(dpy, locks[screen]->gc, locks[screen]->colors[color]);
-					// tip of triangle
-					int xtt, ytt;
-					xtt = DisplayWidth(dpy, screen)/2;
-					ytt = DisplayHeight(dpy, screen)/2 + 60;
-					for(int i=0; i < 30; i++){
-					  XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
-					}
-
-					//XClearWindow(dpy, locks[screen]->win);
-					XFlush(dpy);
 				}
 				oldc = color;
 			}
@@ -240,6 +268,9 @@ readpw(Display *dpy, const char *pws)
 		} else for (screen = 0; screen < nscreens; screen++)
 			XRaiseWindow(dpy, locks[screen]->win);
 	}
+
+	// stop ui thread
+	pthread_cancel(ui);
 }
 
 static void
