@@ -149,12 +149,15 @@ void *updateUI(void *arg){
       XFillRectangle(dpy, locks[screen]->win, locks[screen]->gc, 0,0, DisplayWidth(dpy, screen), DisplayHeight(dpy, screen));
 
       XSetForeground(dpy, locks[screen]->gc, blackColor);
-      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1, x2, y2);
-      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+1, x2, y2+1);
-      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+2, x2, y2+2);
-
       XSetFont(dpy, locks[screen]->gc, font_info->fid);
-      XDrawString(dpy, locks[screen]->win, locks[screen]->gc, x1+20, y1-20, msgs[curr%sizemsgs], strlen(msgs[curr%sizemsgs]) );
+      int xc = (x1+x2)/2;
+      int msglen = strlen(msgs[curr%sizemsgs]);
+      int k = 8;
+      XDrawString(dpy, locks[screen]->win, locks[screen]->gc, xc - k*msglen, y1-20, msgs[curr%sizemsgs], msglen);
+
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-50, y1, xc+(k)*msglen+50, y2);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-50, y1+1, xc+(k)*msglen+50, y2+1);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-50, y1+2, xc+(k)*msglen+50, y2+2);
 
       XSetForeground(dpy, locks[screen]->gc, locks[screen]->colors[INPUT]);
       // tip of triangle
@@ -167,7 +170,7 @@ void *updateUI(void *arg){
       //XClearWindow(dpy, locks[screen]->win);
       XFlush(dpy);
     }
-    curr++;
+    curr = (curr+1)%sizemsgs;
 
     sleep(1);
   }
@@ -250,6 +253,7 @@ readpw(Display *dpy, const char *pws)
         font_info = XLoadQueryFont(dpy, font_name);
         if (!font_info)
           fprintf(stderr, "XLoadQueryFont: failed loading font '%s'\n", font_name);
+        XInitThreads();
         pthread_create(&ui, NULL, updateUI, dpy);
         for (screen = 0; screen < nscreens; screen++) {
           XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[color]);
