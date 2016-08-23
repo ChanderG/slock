@@ -51,6 +51,7 @@ static Bool failure = False;
 static Bool rr;
 static int rrevbase;
 static int rrerrbase;
+static XFontStruct* font_info;
 
 static void
 die(const char *errstr, ...)
@@ -125,10 +126,9 @@ void *updateUI(void *arg){
   int sizemsgs = 3;
   int curr = 0;
   int screen;
+  pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-  //while(1){
-
-    curr++;
+  while(1){
 
     for (screen = 0; screen < nscreens; screen++) {
 
@@ -153,11 +153,6 @@ void *updateUI(void *arg){
       XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+1, x2, y2+1);
       XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, x1, y1+2, x2, y2+2);
 
-      XFontStruct* font_info;
-      char *font_name = "terminus-pt154-bold-32";
-      font_info = XLoadQueryFont(dpy, font_name);
-      if (!font_info)
-	fprintf(stderr, "XLoadQueryFont: failed loading font '%s'\n", font_name);
       XSetFont(dpy, locks[screen]->gc, font_info->fid);
       XDrawString(dpy, locks[screen]->win, locks[screen]->gc, x1+20, y1-20, msgs[curr%sizemsgs], strlen(msgs[curr%sizemsgs]) );
 
@@ -166,16 +161,16 @@ void *updateUI(void *arg){
       int xtt, ytt;
       xtt = DisplayWidth(dpy, screen)/2;
       ytt = DisplayHeight(dpy, screen)/2 + 60;
-      for(int i=0; i < 30; i++){
-	XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
-      }
+      for(int i=0; i < 30; i++)
+        XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
 
       //XClearWindow(dpy, locks[screen]->win);
       XFlush(dpy);
     }
+    curr++;
 
-    sleep(3);
-  //}
+    sleep(1);
+  }
 
 }
 
@@ -186,245 +181,249 @@ readpw(Display *dpy)
 readpw(Display *dpy, const char *pws)
 #endif
 {
-	char buf[32], passwd[256];
-	int num, screen;
-	unsigned int len, color;
-	KeySym ksym;
-	XEvent ev;
-	static int oldc = INIT;
+  char buf[32], passwd[256];
+  int num, screen;
+  unsigned int len, color;
+  KeySym ksym;
+  XEvent ev;
+  static int oldc = INIT;
 
-	len = 0;
-	running = True;
+  len = 0;
+  running = True;
 
-	pthread_t ui;
+  pthread_t ui;
 
-	/* As "slock" stands for "Simple X display locker", the DPMS settings
-	 * had been removed and you can set it with "xset" or some other
-	 * utility. This way the user can easily set a customized DPMS
-	 * timeout. */
-	while (running && !XNextEvent(dpy, &ev)) {
-		if (ev.type == KeyPress) {
-			explicit_bzero(&buf, sizeof(buf));
-			num = XLookupString(&ev.xkey, buf, sizeof(buf), &ksym, 0);
-			if (IsKeypadKey(ksym)) {
-				if (ksym == XK_KP_Enter)
-					ksym = XK_Return;
-				else if (ksym >= XK_KP_0 && ksym <= XK_KP_9)
-					ksym = (ksym - XK_KP_0) + XK_0;
-			}
-			if (IsFunctionKey(ksym) ||
-			    IsKeypadKey(ksym) ||
-			    IsMiscFunctionKey(ksym) ||
-			    IsPFKey(ksym) ||
-			    IsPrivateKeypadKey(ksym))
-				continue;
-			switch (ksym) {
-			case XK_Return:
-				passwd[len] = 0;
+  /* As "slock" stands for "Simple X display locker", the DPMS settings
+   * had been removed and you can set it with "xset" or some other
+   * utility. This way the user can easily set a customized DPMS
+   * timeout. */
+  while (running && !XNextEvent(dpy, &ev)) {
+    if (ev.type == KeyPress) {
+      explicit_bzero(&buf, sizeof(buf));
+      num = XLookupString(&ev.xkey, buf, sizeof(buf), &ksym, 0);
+      if (IsKeypadKey(ksym)) {
+        if (ksym == XK_KP_Enter)
+          ksym = XK_Return;
+        else if (ksym >= XK_KP_0 && ksym <= XK_KP_9)
+          ksym = (ksym - XK_KP_0) + XK_0;
+      }
+      if (IsFunctionKey(ksym) ||
+          IsKeypadKey(ksym) ||
+          IsMiscFunctionKey(ksym) ||
+          IsPFKey(ksym) ||
+          IsPrivateKeypadKey(ksym))
+        continue;
+      switch (ksym) {
+        case XK_Return:
+          passwd[len] = 0;
 #ifdef HAVE_BSD_AUTH
-				running = !auth_userokay(getlogin(), NULL, "auth-xlock", passwd);
+          running = !auth_userokay(getlogin(), NULL, "auth-xlock", passwd);
 #else
-				running = !!strcmp(crypt(passwd, pws), pws);
+          running = !!strcmp(crypt(passwd, pws), pws);
 #endif
-				if (running) {
-					XBell(dpy, 100);
-					failure = True;
-				}
-				explicit_bzero(&passwd, sizeof(passwd));
-				len = 0;
-				break;
-			case XK_Escape:
-				explicit_bzero(&passwd, sizeof(passwd));
-				len = 0;
-				break;
-			case XK_BackSpace:
-				if (len)
-					passwd[len--] = 0;
-				break;
-			default:
-				if (num && !iscntrl((int)buf[0]) && (len + num < sizeof(passwd))) {
-					memcpy(passwd + len, buf, num);
-					len += num;
-				}
-				break;
-			}
-			color = len ? INPUT : (failure || failonclear ? FAILED : INIT);
-			if (running && oldc != color) {
-				// start the thread
-				pthread_create(&ui, NULL, updateUI, dpy);
-				for (screen = 0; screen < nscreens; screen++) {
-					XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[color]);
-				}
-				oldc = color;
-			}
-		} else if (rr && ev.type == rrevbase + RRScreenChangeNotify) {
-			XRRScreenChangeNotifyEvent *rre = (XRRScreenChangeNotifyEvent*)&ev;
-			for (screen = 0; screen < nscreens; screen++) {
-				if (locks[screen]->win == rre->window) {
-					XResizeWindow(dpy, locks[screen]->win, rre->width, rre->height);
-					XClearWindow(dpy, locks[screen]->win);
-				}
-			}
-		} else for (screen = 0; screen < nscreens; screen++)
-			XRaiseWindow(dpy, locks[screen]->win);
-	}
+          if (running) {
+            XBell(dpy, 100);
+            failure = True;
+          }
+          explicit_bzero(&passwd, sizeof(passwd));
+          len = 0;
+          break;
+        case XK_Escape:
+          explicit_bzero(&passwd, sizeof(passwd));
+          len = 0;
+          break;
+        case XK_BackSpace:
+          if (len)
+            passwd[len--] = 0;
+          break;
+        default:
+          if (num && !iscntrl((int)buf[0]) && (len + num < sizeof(passwd))) {
+            memcpy(passwd + len, buf, num);
+            len += num;
+          }
+          break;
+      }
+      color = len ? INPUT : (failure || failonclear ? FAILED : INIT);
+      if (running && oldc != color) {
+        // start the thread
+        char *font_name = "terminus-pt154-bold-32";
+        font_info = XLoadQueryFont(dpy, font_name);
+        if (!font_info)
+          fprintf(stderr, "XLoadQueryFont: failed loading font '%s'\n", font_name);
+        pthread_create(&ui, NULL, updateUI, dpy);
+        for (screen = 0; screen < nscreens; screen++) {
+          XSetWindowBackground(dpy, locks[screen]->win, locks[screen]->colors[color]);
+        }
+        oldc = color;
+      }
+    } else if (rr && ev.type == rrevbase + RRScreenChangeNotify) {
+      XRRScreenChangeNotifyEvent *rre = (XRRScreenChangeNotifyEvent*)&ev;
+      for (screen = 0; screen < nscreens; screen++) {
+        if (locks[screen]->win == rre->window) {
+          XResizeWindow(dpy, locks[screen]->win, rre->width, rre->height);
+          XClearWindow(dpy, locks[screen]->win);
+        }
+      }
+    } else for (screen = 0; screen < nscreens; screen++)
+      XRaiseWindow(dpy, locks[screen]->win);
+  }
 
-	// stop ui thread
-	pthread_cancel(ui);
+  // stop ui thread
+  pthread_cancel(ui);
 }
 
-static void
+  static void
 unlockscreen(Display *dpy, Lock *lock)
 {
-	if(dpy == NULL || lock == NULL)
-		return;
+  if(dpy == NULL || lock == NULL)
+    return;
 
-	XUngrabPointer(dpy, CurrentTime);
-	XFreeColors(dpy, DefaultColormap(dpy, lock->screen), lock->colors, NUMCOLS, 0);
-	XFreePixmap(dpy, lock->pmap);
-	XFreeGC(dpy, lock->gc);
-	XDestroyWindow(dpy, lock->win);
+  XUngrabPointer(dpy, CurrentTime);
+  XFreeColors(dpy, DefaultColormap(dpy, lock->screen), lock->colors, NUMCOLS, 0);
+  XFreePixmap(dpy, lock->pmap);
+  XFreeGC(dpy, lock->gc);
+  XDestroyWindow(dpy, lock->win);
 
-	free(lock);
+  free(lock);
 }
 
-static Lock *
+  static Lock *
 lockscreen(Display *dpy, int screen)
 {
-	char curs[] = {0, 0, 0, 0, 0, 0, 0, 0};
-	unsigned int len;
-	int i;
-	Lock *lock;
-	XColor color, dummy;
-	XSetWindowAttributes wa;
-	Cursor invisible;
+  char curs[] = {0, 0, 0, 0, 0, 0, 0, 0};
+  unsigned int len;
+  int i;
+  Lock *lock;
+  XColor color, dummy;
+  XSetWindowAttributes wa;
+  Cursor invisible;
 
-	if (!running || dpy == NULL || screen < 0 || !(lock = malloc(sizeof(Lock))))
-		return NULL;
+  if (!running || dpy == NULL || screen < 0 || !(lock = malloc(sizeof(Lock))))
+    return NULL;
 
-	lock->screen = screen;
-	lock->root = RootWindow(dpy, lock->screen);
+  lock->screen = screen;
+  lock->root = RootWindow(dpy, lock->screen);
 
-	for (i = 0; i < NUMCOLS; i++) {
-		XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen), colorname[i], &color, &dummy);
-		lock->colors[i] = color.pixel;
-	}
+  for (i = 0; i < NUMCOLS; i++) {
+    XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen), colorname[i], &color, &dummy);
+    lock->colors[i] = color.pixel;
+  }
 
-	/* init */
-	wa.override_redirect = 1;
-	wa.background_pixel = lock->colors[INIT];
-	lock->win = XCreateWindow(dpy, lock->root, 0, 0, DisplayWidth(dpy, lock->screen), DisplayHeight(dpy, lock->screen),
-	                          0, DefaultDepth(dpy, lock->screen), CopyFromParent,
-	                          DefaultVisual(dpy, lock->screen), CWOverrideRedirect | CWBackPixel, &wa);
-	lock->gc = XCreateGC(dpy, lock->win, 0, 0);
-	lock->pmap = XCreateBitmapFromData(dpy, lock->win, curs, 8, 8);
-	invisible = XCreatePixmapCursor(dpy, lock->pmap, lock->pmap, &color, &color, 0, 0);
-	XDefineCursor(dpy, lock->win, invisible);
-	XClearWindow(dpy, lock->win);
-	XMapRaised(dpy, lock->win);
-	if (rr)
-		XRRSelectInput(dpy, lock->win, RRScreenChangeNotifyMask);
+  /* init */
+  wa.override_redirect = 1;
+  wa.background_pixel = lock->colors[INIT];
+  lock->win = XCreateWindow(dpy, lock->root, 0, 0, DisplayWidth(dpy, lock->screen), DisplayHeight(dpy, lock->screen),
+      0, DefaultDepth(dpy, lock->screen), CopyFromParent,
+      DefaultVisual(dpy, lock->screen), CWOverrideRedirect | CWBackPixel, &wa);
+  lock->gc = XCreateGC(dpy, lock->win, 0, 0);
+  lock->pmap = XCreateBitmapFromData(dpy, lock->win, curs, 8, 8);
+  invisible = XCreatePixmapCursor(dpy, lock->pmap, lock->pmap, &color, &color, 0, 0);
+  XDefineCursor(dpy, lock->win, invisible);
+  XClearWindow(dpy, lock->win);
+  XMapRaised(dpy, lock->win);
+  if (rr)
+    XRRSelectInput(dpy, lock->win, RRScreenChangeNotifyMask);
 
-	/* Try to grab mouse pointer *and* keyboard, else fail the lock */
-	for (len = 1000; len; len--) {
-		if (XGrabPointer(dpy, lock->root, False, ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-		    GrabModeAsync, GrabModeAsync, None, invisible, CurrentTime) == GrabSuccess)
-			break;
-		usleep(1000);
-	}
-	if (!len) {
-		fprintf(stderr, "slock: unable to grab mouse pointer for screen %d\n", screen);
-	} else {
-		for (len = 1000; len; len--) {
-			if (XGrabKeyboard(dpy, lock->root, True, GrabModeAsync, GrabModeAsync, CurrentTime) == GrabSuccess) {
-				/* everything fine, we grabbed both inputs */
-				XSelectInput(dpy, lock->root, SubstructureNotifyMask);
-				return lock;
-			}
-			usleep(1000);
-		}
-		fprintf(stderr, "slock: unable to grab keyboard for screen %d\n", screen);
-	}
-	/* grabbing one of the inputs failed */
-	running = 0;
-	unlockscreen(dpy, lock);
-	return NULL;
+  /* Try to grab mouse pointer *and* keyboard, else fail the lock */
+  for (len = 1000; len; len--) {
+    if (XGrabPointer(dpy, lock->root, False, ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+          GrabModeAsync, GrabModeAsync, None, invisible, CurrentTime) == GrabSuccess)
+      break;
+    usleep(1000);
+  }
+  if (!len) {
+    fprintf(stderr, "slock: unable to grab mouse pointer for screen %d\n", screen);
+  } else {
+    for (len = 1000; len; len--) {
+      if (XGrabKeyboard(dpy, lock->root, True, GrabModeAsync, GrabModeAsync, CurrentTime) == GrabSuccess) {
+        /* everything fine, we grabbed both inputs */
+        XSelectInput(dpy, lock->root, SubstructureNotifyMask);
+        return lock;
+      }
+      usleep(1000);
+    }
+    fprintf(stderr, "slock: unable to grab keyboard for screen %d\n", screen);
+  }
+  /* grabbing one of the inputs failed */
+  running = 0;
+  unlockscreen(dpy, lock);
+  return NULL;
 }
 
-static void
+  static void
 usage(void)
 {
-	fprintf(stderr, "usage: slock [-v|POST_LOCK_CMD]\n");
-	exit(1);
+  fprintf(stderr, "usage: slock [-v|POST_LOCK_CMD]\n");
+  exit(1);
 }
 
 int
 main(int argc, char **argv) {
 #ifndef HAVE_BSD_AUTH
-	const char *pws;
+  const char *pws;
 #endif
-	Display *dpy;
-	int screen;
+  Display *dpy;
+  int screen;
 
-	if ((argc >= 2) && !strcmp("-v", argv[1]))
-		die("version %s, © 2006-2016 slock engineers\n", VERSION);
+  if ((argc >= 2) && !strcmp("-v", argv[1]))
+    die("version %s, © 2006-2016 slock engineers\n", VERSION);
 
-	/* treat first argument starting with a '-' as option */
-	if ((argc >= 2) && argv[1][0] == '-')
-		usage();
+  /* treat first argument starting with a '-' as option */
+  if ((argc >= 2) && argv[1][0] == '-')
+    usage();
 
 #ifdef __linux__
-	dontkillme();
+  dontkillme();
 #endif
 
-	if (!getpwuid(getuid()))
-		die("no passwd entry for you\n");
+  if (!getpwuid(getuid()))
+    die("no passwd entry for you\n");
 
 #ifndef HAVE_BSD_AUTH
-	pws = getpw();
+  pws = getpw();
 #endif
 
-	if (!(dpy = XOpenDisplay(0)))
-		die("cannot open display\n");
-	rr = XRRQueryExtension(dpy, &rrevbase, &rrerrbase);
-	/* Get the number of screens in display "dpy" and blank them all. */
-	nscreens = ScreenCount(dpy);
-	if (!(locks = malloc(sizeof(Lock*) * nscreens)))
-		die("Out of memory.\n");
-	int nlocks = 0;
-	for (screen = 0; screen < nscreens; screen++) {
-		if ((locks[screen] = lockscreen(dpy, screen)) != NULL)
-			nlocks++;
-	}
-	XSync(dpy, False);
+  if (!(dpy = XOpenDisplay(0)))
+    die("cannot open display\n");
+  rr = XRRQueryExtension(dpy, &rrevbase, &rrerrbase);
+  /* Get the number of screens in display "dpy" and blank them all. */
+  nscreens = ScreenCount(dpy);
+  if (!(locks = malloc(sizeof(Lock*) * nscreens)))
+    die("Out of memory.\n");
+  int nlocks = 0;
+  for (screen = 0; screen < nscreens; screen++) {
+    if ((locks[screen] = lockscreen(dpy, screen)) != NULL)
+      nlocks++;
+  }
+  XSync(dpy, False);
 
-	/* Did we actually manage to lock something? */
-	if (nlocks == 0) { /* nothing to protect */
-		free(locks);
-		XCloseDisplay(dpy);
-		return 1;
-	}
+  /* Did we actually manage to lock something? */
+  if (nlocks == 0) { /* nothing to protect */
+    free(locks);
+    XCloseDisplay(dpy);
+    return 1;
+  }
 
-	if (argc >= 2 && fork() == 0) {
-		if (dpy)
-			close(ConnectionNumber(dpy));
-		execvp(argv[1], argv+1);
-		die("execvp %s failed: %s\n", argv[1], strerror(errno));
-	}
+  if (argc >= 2 && fork() == 0) {
+    if (dpy)
+      close(ConnectionNumber(dpy));
+    execvp(argv[1], argv+1);
+    die("execvp %s failed: %s\n", argv[1], strerror(errno));
+  }
 
-	/* Everything is now blank. Now wait for the correct password. */
+  /* Everything is now blank. Now wait for the correct password. */
 #ifdef HAVE_BSD_AUTH
-	readpw(dpy);
+  readpw(dpy);
 #else
-	readpw(dpy, pws);
+  readpw(dpy, pws);
 #endif
 
-	/* Password ok, unlock everything and quit. */
-	for (screen = 0; screen < nscreens; screen++)
-		unlockscreen(dpy, locks[screen]);
+  /* Password ok, unlock everything and quit. */
+  for (screen = 0; screen < nscreens; screen++)
+    unlockscreen(dpy, locks[screen]);
 
-	free(locks);
-	XCloseDisplay(dpy);
+  free(locks);
+  XCloseDisplay(dpy);
 
-	return 0;
+  return 0;
 }
