@@ -34,6 +34,8 @@ enum {
 	NUMCOLS
 };
 
+#define NUMSHADES 11
+
 #include "config.h"
 
 typedef struct {
@@ -41,6 +43,7 @@ typedef struct {
 	Window root, win;
 	Pixmap pmap;
 	unsigned long colors[NUMCOLS];
+    unsigned long tricolors[NUMSHADES];
 	GC gc;
 } Lock;
 
@@ -122,8 +125,8 @@ void *updateUI(void *arg){
 
   Display *dpy = (Display *)arg;
 
-  char *msgs[] = {"CONSIDER", "YOUR", "ACTIONS."};
-  int sizemsgs = 3;
+  char *msgs[] = {"INVESTIGATION", "ONGOING."};
+  int sizemsgs = 2;
   int curr = 0;
   int screen;
   pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
@@ -155,24 +158,38 @@ void *updateUI(void *arg){
       int k = 8;
       XDrawString(dpy, locks[screen]->win, locks[screen]->gc, xc - k*msglen, y1-20, msgs[curr%sizemsgs], msglen);
 
-      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-50, y1, xc+(k)*msglen+50, y2);
-      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-50, y1+1, xc+(k)*msglen+50, y2+1);
-      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-50, y1+2, xc+(k)*msglen+50, y2+2);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-25, y1, xc+(k)*msglen+25, y2);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-25, y1+1, xc+(k)*msglen+25, y2+1);
+      XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xc-(k)*msglen-25, y1+2, xc+(k)*msglen+25, y2+2);
 
-      XSetForeground(dpy, locks[screen]->gc, locks[screen]->colors[INPUT]);
+      //XSetForeground(dpy, locks[screen]->gc, locks[screen]->colors[INPUT]);
       // tip of triangle
       int xtt, ytt;
       xtt = DisplayWidth(dpy, screen)/2;
       ytt = DisplayHeight(dpy, screen)/2 + 60;
-      for(int i=0; i < 30; i++)
-        XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
+      for (int j = 0; j < NUMSHADES; j++) {
+        XSetForeground(dpy, locks[screen]->gc, locks[screen]->tricolors[j]);
+        for(int i=0; i < 30; i++) {
+          XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
+        }
+        XFlush(dpy);
+        usleep(50*1000);
+      }
+
+      for (int j = NUMSHADES-1; j >= 0; j--) {
+        XSetForeground(dpy, locks[screen]->gc, locks[screen]->tricolors[j]);
+        for(int i=0; i < 30; i++)
+          XDrawLine(dpy, locks[screen]->win, locks[screen]->gc, xtt - i/2, ytt+i, xtt+i/2, ytt+i);
+        XFlush(dpy);
+        usleep(50*1000);
+      }
 
       //XClearWindow(dpy, locks[screen]->win);
       XFlush(dpy);
     }
     curr = (curr+1)%sizemsgs;
 
-    sleep(1);
+    //sleep(1);
   }
 
 }
@@ -311,6 +328,11 @@ lockscreen(Display *dpy, int screen)
   for (i = 0; i < NUMCOLS; i++) {
     XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen), colorname[i], &color, &dummy);
     lock->colors[i] = color.pixel;
+  }
+
+  for (i = 0; i < NUMSHADES; i++) {
+    XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen), triangleColors[i], &color, &dummy);
+    lock->tricolors[i] = color.pixel;
   }
 
   /* init */
